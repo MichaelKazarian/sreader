@@ -1,0 +1,89 @@
+#+TITLE: Налаштування та робота з проєктом snd_analizer для Raspberry Pi Pico
+#+AUTHOR: Михайло Казарян
+#+DATE: 2025-02-26
+#+STARTUP: overview
+
+* Опис проєкту
+Проєкт *snd_analizer.c* призначений для зчитування звукового сигналу з мікрофона через АЦП Raspberry Pi Pico,
+побудови графіку на LCD 16x2 (I2C) та навігації по значеннях за допомогою енкодера. Цей документ описує процес
+первинного запуску, компіляції та вивантаження проєкту на Pico.
+
+* Первинний запуск
+Перед початком роботи переконайтеся, що у вас встановлені необхідні інструменти:
+- Raspberry Pi Pico SDK (розташований за шляхом `../../../pico/pico-sdk/`).
+- `cmake`, `make`, `picotool` та `minicom` (встановлені в системі).
+- Проєктний файл `snd_analizer.c` та `Makefile` у поточному каталозі.
+
+*** Кроки для первинного запуску:**
+1. Відкрийте термінал у каталозі з `snd_analizer.c` та `Makefile`.
+2. Ініціалізуйте проєкт (створення директорії `build` та генерація файлів CMake):
+   #+BEGIN_SRC sh :results output
+   make init
+   #+END_SRC
+   Очікуваний вивід:
+   #+BEGIN_EXAMPLE
+   Project initialized. Read 'Getting Started with Pico' at /home/pi/Bookshelf/getting-started-with-pico.pdf
+   #+END_EXAMPLE
+   Ця команда налаштовує `PICO_SDK_PATH` і готує проєкт до компіляції.
+
+* Компіляція проєкту
+Після ініціалізації можна скомпілювати проєкт.
+
+**Кроки для компіляції:**
+1. Виконайте команду компіляції:
+   #+BEGIN_SRC sh :results output
+   make compile
+   #+END_SRC
+   - Створюється директорія `build` (якщо її ще немає).
+   - Виконується `cmake ..` та `make -j4` для паралельної компіляції.
+2. Перевірте, чи з’явився файл `snd_analizer.uf2` у директорії `build`.
+
+* Вивантаження проєкту на Pico
+Після компіляції проєкт готовий до завантаження на Raspberry Pi Pico.
+
+**Кроки для вивантаження:**
+1. Підключіть Pico до комп’ютера, утримуючи кнопку BOOTSEL, щоб увійти в режим завантаження.
+   - Pico з’явиться як USB-накопичувач (`/media/your_user/RPI-RP2/`).
+2. Завантажте проєкт на Pico:
+   #+BEGIN_SRC sh :results output
+   make upload
+   #+END_SRC
+   - Команда компілює проєкт (якщо потрібно) і завантажує `snd_analizer.uf2` на Pico через `picotool`.
+   - Після завантаження Pico автоматично перезавантажується.
+3. Pico почне виконувати проєкт.
+
+* Перевірка роботи
+1. Після завантаження підключіться до Pico через термінал для моніторингу виводу:
+   #+BEGIN_SRC sh :results output
+   make monitor
+   #+END_SRC
+   - Відкриється `minicom` із параметрами `/dev/ttyACM0` та baud rate 115200.
+   - Ви побачите дебаг-повідомлення, наприклад, "Encoder slice 0" або "Calling measure_pin_pressed()".
+2. Натисніть на пін `MEASURE_PIN` (GPIO 3) для запуску вимірювання.
+3. Поверніть енкодер для навігації по значеннях на LCD.
+
+* Makefile
+Робота з проектом відбувається через `Makefile`, який використовується в проєкті:
+** Команди
+- **Очищення збірки**:
+  #+BEGIN_SRC sh :results output
+  make clean
+  #+END_SRC
+- **Повне очищення (видалення build)**:
+  #+BEGIN_SRC sh :results output
+  make clean-all
+  #+END_SRC
+- **Перезавантаження Pico**:
+  #+BEGIN_SRC sh :results output
+  make reboot
+  #+END_SRC
+
+* Нотатки
+- Якщо Pico SDK розташований в іншому місці, відредагуйте `PICO_SDK_PATH` у `Makefile`:
+  #+BEGIN_SRC makefile
+  PICO_SDK_PATH = /path/to/pico-sdk
+  #+END_SRC
+- Для дебагу зніміть `@` перед командами в `Makefile`, щоб бачити повний вивід.
+
+* Джерела
+- Документація: `/home/pi/Bookshelf/getting-started-with-pico.pdf`.
