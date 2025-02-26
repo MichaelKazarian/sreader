@@ -29,6 +29,7 @@
 extern const uint16_t ADC_NOISE;
 extern const int SAMPLE_SLICE;
 extern const float CONVERSION_FACTOR;
+extern uint32_t saved_slices_maximums[TOTAL_SLICES];
 
 // Глобальні змінні
 extern uint16_t adc_values[SAMPLE_ARRAY_SIZE];

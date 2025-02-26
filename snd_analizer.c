@@ -10,6 +10,7 @@ bool collecting_data = false;
 bool data_collection_complete = false;
 struct repeating_timer timer;
 uint32_t saved_slices_averages[TOTAL_SLICES];
+uint32_t saved_slices_maximums[TOTAL_SLICES];
 int encoder_slice_index = 0;
 bool encoder_active = false;
 bool encoder_update_needed = false;
@@ -293,7 +294,7 @@ int is_noise(uint32_t value) {
  * @return Масштабоване значення в діапазоні 1-8.
  */
 int scale_adc_value(uint32_t average) {
-    int max_value = 3000; // 4096
+    int max_value = 3200; // 4096
     if (average < ADC_NOISE) return 1;
     return ((average - ADC_NOISE) * 7 + (max_value - ADC_NOISE) / 2) / (max_value - ADC_NOISE) + 1;
 }
@@ -389,24 +390,27 @@ void display_effective_slices(int sample_count, int slice_length) {
   lcd_print(buffer);
 }
 
-/**
- * Обчислює середні значення для кожного слайсу на основі зібраних зразків і
- * зберігає їх у масивах slices_averages та saved_slices_averages.
- *
- * @param effective_samples Загальна кількість зібраних зразків.
- * @param slice_length Довжина одного слайсу.
- * @param slices_averages Локальний масив для зберігання середніх значень слайсів.
- * @param saved_slices_averages Глобальний масив для збереження середніх значень для енкодера.
- */
-void calculate_slice_averages(int effective_samples, int slice_length,
+void calculate_slice_averages(int effective_samples, int slice_length, 
                               uint32_t* slices_averages, uint32_t* saved_slices_averages) {
-    for (int i = 0; i < TOTAL_SLICES; i++) {
-        int start_idx = i * slice_length;
-        int end_idx = (i + 1) * slice_length;
-        if (end_idx > effective_samples) end_idx = effective_samples;
-        slices_averages[i] = (uint32_t)calculate_average(start_idx, end_idx);
-        saved_slices_averages[i] = slices_averages[i]; // Зберігаємо для енкодера
+  for (int i = 0; i < TOTAL_SLICES; i++) {
+    int start_idx = i * slice_length;
+    int end_idx = (i + 1) * slice_length;
+    if (end_idx > effective_samples) end_idx = effective_samples;
+
+    uint32_t sum = 0;
+    uint32_t max = 0;
+    int count = 0;
+    for (int j = start_idx; j < end_idx; j++) {
+      if (!is_noise(adc_values[j])) {
+        sum += adc_values[j];
+        if (adc_values[j] > max) max = adc_values[j];
+        count++;
+      }
     }
+    slices_averages[i] = (count > 0) ? (sum / count) : 0;
+    saved_slices_averages[i] = slices_averages[i];
+    saved_slices_maximums[i] = max;
+  }
 }
 
 /**
@@ -468,25 +472,19 @@ bool should_update_encoder_display() {
     return encoder_update_needed && encoder_active && !collecting_data;
 }
 
-/**
- * Оновлює LCD-дисплей, виводячи поточне значення енкодера в вольтах 
- * у форматі "index:volts" (наприклад, "14:1.234" або " 9:1.234") у рядку 0. 
- * Рядок вирівнюється праворуч: якщо довжина < 8 символів, 
- * останній символ на позиції 15, інакше починається з позиції 8.
- */
 void update_encoder_display() {
     float volts_value = saved_slices_averages[encoder_slice_index] * CONVERSION_FACTOR;
-    
-    char buffer[9]; // 8 символів + \0
-    sprintf(buffer, "%2d:%.3f", encoder_slice_index+1, volts_value);
+    float max_value = saved_slices_maximums[encoder_slice_index] * CONVERSION_FACTOR;
 
+    char buffer[14];
+    sprintf(buffer, "%2d/%.3f/%.3f", encoder_slice_index + 1, volts_value, max_value);
     /* int len = strlen(buffer); */
     /* int start_pos = (len < 8) ? (15 - len + 1) : 8; */
-    int start_pos = 8;
+    int start_pos = 2;
 
     lcd_setCursor(1, start_pos);
     lcd_print(buffer);
-    
+
     encoder_update_needed = false;
 }
 

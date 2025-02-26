@@ -69,6 +69,7 @@ void print_effective_slices( int sample_count, int slice_length) {
 
 ** Рефакторинг
 *** DONE Покращення gpio_interrupt_handler
+
 Мені не дуже подобається код gpio_interrupt_handler().
 1) Винеси перевірку антидребезгу в окрему функцію.
 2) Винеси саму цю перевірку в окрему функцію (gpio == ENCODER_CLK_PIN && encoder_active && !collecting_data)
@@ -115,3 +116,5 @@ void gpio_interrupt_handler(uint gpio, uint32_t events) {
     }
 }
 #+END_SRC
+*** DONE Вивести максимальне значення слайса
+Під час формування saved_slices_averages[TOTAL_SLICES]; потрібно зберегти значення максимального значення для кожного слайса і при прокручуванні енкодера вивести його в lcd_setCursor(1, 1);
