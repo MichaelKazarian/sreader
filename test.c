@@ -328,12 +328,26 @@ void print_slices_averages(uint32_t slices_averages[], int slices_count) {
 }
 
 
-void print_effective_slices( int sample_count, int slice_length) {
-  printf("Effective samples count: %d; sclice length %d\n", sample_count, slice_length);
-  char buffer1[16]; sprintf(buffer1, "%d", sample_count);
-  char buffer2[16]; sprintf(buffer2, "%d", slice_length);
-  lcd_setCursor(1, 0); lcd_print("Cnt:"); lcd_setCursor(1, 4); lcd_print(buffer1);
-  lcd_setCursor(1, 9); lcd_print("L:"); lcd_setCursor(1, 11); lcd_print(buffer2);
+/**
+ * Виводить кількість зібраних зразків (sample_count) і довжину слайсу (slice_length)
+ * на LCD у рядку 0, починаючи з позиції 8. Якщо рядок коротший за 8 символів,
+ * він зсувається максимально вправо так, щоб останній символ був на позиції 15.
+ * Значення розділяються символом '/'.
+ *
+ * @param sample_count Кількість зібраних зразків (макс. 4000, 4 символи).
+ * @param slice_length Довжина одного слайсу (макс. 100, 3 символи).
+ */
+void print_effective_slices(int sample_count, int slice_length) {
+  printf("Effective samples count: %d; slice length %d\n", sample_count, slice_length);
+
+  char buffer[9]; // 8 символів + \0, для макс. "4000/100"
+  sprintf(buffer, "%d/%d", sample_count, slice_length);
+
+  int len = strlen(buffer);
+  int start_pos = (len < 8) ? (15 - len + 1) : 8; // Зсув до позиції 15, якщо<8
+
+  lcd_setCursor(0, start_pos);
+  lcd_print(buffer);
 }
 
 
