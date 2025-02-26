@@ -1,18 +1,32 @@
+PROJECT_NAME = snd_analizer
+BUILD_DIR = build
+PICO_SDK_PATH = ../../../pico/pico-sdk
+UF2_FILE = $(BUILD_DIR)/$(PROJECT_NAME).uf2
+TTY_DEVICE = /dev/ttyACM0
+BAUD_RATE = 115200
+
 compile:
-	cd build && make
+	@mkdir -p $(BUILD_DIR)
+	@cd $(BUILD_DIR) && cmake .. && make -j4
 
 upload: compile
-	cd build && picotool load -F snd_analizer.uf2 && picotool reboot -f
+	picotool load -F $(UF2_FILE) && picotool reboot -f
 
 reboot:
-	picotool reboot -f
+	@picotool reboot -f
 
 clean:
-	cd build && make clean
+	@cd $(BUILD_DIR) && make clean
+
+clean-all:
+	@rm -rf $(BUILD_DIR)
 
 monitor:
-	 minicom -b 115200 -o -D  /dev/ttyACM0
+	@minicom -b $(BAUD_RATE) -o -D $(TTY_DEVICE)
 
 init:
-	echo "Read character Manually Create your own Project at /home/pi/Bookshelf/getting-started-with-pico.pdf" 
+	@mkdir -p $(BUILD_DIR)
+	@export PICO_SDK_PATH=$(PICO_SDK_PATH) && cd $(BUILD_DIR) && cmake ..
+	@echo "Project initialized. Read 'Getting Started with Pico' at /home/pi/Bookshelf/getting-started-with-pico.pdf"
 
+.PHONY: compile upload reboot clean clean-all monitor init
