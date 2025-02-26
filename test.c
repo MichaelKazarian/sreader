@@ -13,6 +13,7 @@
 #define SAMPLE_ARRAY_SIZE 4000 // Кількість зразків для зберігання
 #define GRAPH_LENGTH 8
 #define GRAPH_SLICE_LENGTH 5
+#define TOTAL_SLICES (GRAPH_LENGTH * GRAPH_SLICE_LENGTH) // Загальна кількість слайсів для графіку
 #define SAMPLE_INTERVAL_MS 1   // Інтервал вибірки, 1 мс можна змінити за потреби
 #define ADC_NOISE_THRESHOLD 50 // Мінімальне відхилення від шуму
 #define BUTTON_DEBOUNCE_US 100000 // 100 мс
@@ -45,7 +46,7 @@ bool collecting_data = false; // Флаг для контролю збиранн
 bool data_collection_complete = false; // Флаг для позначення завершення збирання даних
 struct repeating_timer timer; // Глобальна змінна для таймера
 
-uint32_t saved_slices_averages[40]; // Глобальний масив для збереження slices_averages
+uint32_t saved_slices_averages[TOTAL_SLICES]; // Масив для збереження slices_averages
 int encoder_slice_index = 0;        // Поточний індекс для енкодера
 bool encoder_active = false;        // Флаг активації енкодера
 bool encoder_update_needed = false;
@@ -302,7 +303,6 @@ void lcd_segment_clear() {
   for (int i=0; i<8; i++) lcd_segment[i] = 0;
 }
 
-
 /**
  * Перевіряє, чи є значення АЦП шумом.
  * 
@@ -399,7 +399,6 @@ void print_slices_averages(uint32_t slices_averages[], int slices_count) {
     }
 }
 
-
 /**
  * Виводить кількість зібраних зразків (sample_count) і довжину слайсу (slice_length)
  * на LCD у рядку 0, починаючи з позиції 8. Якщо рядок коротший за 8 символів,
@@ -409,7 +408,7 @@ void print_slices_averages(uint32_t slices_averages[], int slices_count) {
  * @param sample_count Кількість зібраних зразків (макс. 4000, 4 символи).
  * @param slice_length Довжина одного слайсу (макс. 100, 3 символи).
  */
-void print_effective_slices(int sample_count, int slice_length) {
+void display_effective_slices(int sample_count, int slice_length) {
   printf("Effective samples count: %d; slice length %d\n", sample_count, slice_length);
 
   char buffer[9]; // 8 символів + \0, для макс. "4000/100"
@@ -422,48 +421,68 @@ void print_effective_slices(int sample_count, int slice_length) {
   lcd_print(buffer);
 }
 
-
 /**
- * Відображає графік на LCD, використовуючи середні значення АЦП по слайсам.
+ * Обчислює середні значення для кожного слайсу на основі зібраних зразків і
+ * зберігає їх у масивах slices_averages та saved_slices_averages.
+ *
+ * @param effective_samples Загальна кількість зібраних зразків.
+ * @param slice_length Довжина одного слайсу.
+ * @param slices_averages Локальний масив для зберігання середніх значень слайсів.
+ * @param saved_slices_averages Глобальний масив для збереження середніх значень для енкодера.
  */
-void draw_graph_on_lcd() {
-    int effective_samples = sample_index;
-    const int total_slices = 40;
-    int slice_length = effective_samples / total_slices;
-    if (slice_length < 1) slice_length = 1;
-    
-    uint32_t slices_averages[total_slices];
-    
-    lcd_segment_clear();
-    lcd_clear();
-
-    for (int i = 0; i < total_slices; i++) {
+void calculate_slice_averages(int effective_samples, int slice_length,
+                              uint32_t* slices_averages, uint32_t* saved_slices_averages) {
+    for (int i = 0; i < TOTAL_SLICES; i++) {
         int start_idx = i * slice_length;
         int end_idx = (i + 1) * slice_length;
         if (end_idx > effective_samples) end_idx = effective_samples;
         slices_averages[i] = (uint32_t)calculate_average(start_idx, end_idx);
         saved_slices_averages[i] = slices_averages[i]; // Зберігаємо для енкодера
     }
+}
 
-    for (int i = 0, cursor_position = 0; i < total_slices; i++) {
+/**
+ * Відображає графік на LCD, масштабуючи середні значення слайсів і записуючи їх
+ * у сегменти дисплея. Кожні 5 слайсів формують один символ, який записується на дисплей.
+ *
+ * @param slices_averages Масив середніх значень слайсів для масштабування та відображення.
+ */
+void display_graph(uint32_t* slices_averages) {
+    for (int i = 0, cursor_position = 0; i < TOTAL_SLICES; i++) {
         uint32_t scaled_value = scale_adc_value(slices_averages[i]);
-        int lcd_segment_position = i % 5;
+        int lcd_segment_position = i % GRAPH_SLICE_LENGTH;
         set_lcd_segment_row(lcd_segment_position, scaled_value);
-        if ((i + 1) % 5 == 0 || i == total_slices - 1) {
+        if ((i + 1) % GRAPH_SLICE_LENGTH == 0 || i == TOTAL_SLICES - 1) {
             lcd_segment_write(cursor_position++);
             lcd_segment_clear();
         }
     }
-    print_slices_averages(slices_averages, total_slices);
-    print_effective_slices(effective_samples, slice_length);
-
-    encoder_active = true; // Активуємо енкодер після вимірювання
-    encoder_slice_index = 0;
-    printf("Encoder activated. Initial slice: %d = %u (scaled: %u)\n", 
-           encoder_slice_index, saved_slices_averages[encoder_slice_index], 
-           scale_adc_value(saved_slices_averages[encoder_slice_index]));
 }
 
+/**
+ * Відображає графік на LCD, використовуючи середні значення АЦП по слайсам.
+ */
+void draw_graph_on_lcd() {
+    int effective_samples = sample_index;
+    int slice_length = effective_samples / TOTAL_SLICES;
+    if (slice_length < 1) slice_length = 1;
+
+    uint32_t slices_averages[TOTAL_SLICES];
+
+    lcd_segment_clear();
+    lcd_clear();
+
+    calculate_slice_averages(effective_samples, slice_length, slices_averages, saved_slices_averages);
+    display_graph(slices_averages);
+    print_slices_averages(slices_averages, TOTAL_SLICES);
+    display_effective_slices(effective_samples, slice_length);
+
+    encoder_active = true;
+    encoder_slice_index = 0;
+    /* printf("Encoder activated. Initial slice: %d = %u (scaled: %u)\n",  */
+    /*        encoder_slice_index, saved_slices_averages[encoder_slice_index],  */
+    /*        scale_adc_value(saved_slices_averages[encoder_slice_index])); */
+}
 
 void lcd_hello() {
   lcd_setCursor(0, 0);
