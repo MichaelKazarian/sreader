@@ -9,7 +9,7 @@
 #include "i2c-display-lib.h"
 
 #define ADC_PIN 26             // Використовуємо GPIO 26 для АЦП
-#define BUTTON_PIN 3          // Кнопка підключена до GPIO 21
+#define MEASURE_PIN 3          // Кнопка підключена до GPIO 21
 #define SAMPLE_ARRAY_SIZE 4000 // Кількість зразків для зберігання
 #define GRAPH_LENGTH 8
 #define GRAPH_SLICE_LENGTH 5
@@ -79,7 +79,7 @@ if (!collecting_data) {
 }
 
 // Обробник переривання для кнопки
-void button_start_pressed() {
+void measure_pin_pressed() {
     if (!collecting_data) {
         timer_start();
     } else {
@@ -89,7 +89,7 @@ void button_start_pressed() {
 
 
 // Обробник для відпускання кнопки
-void button_released() {
+void measure_pin_released() {
     if (collecting_data) {
         collecting_data = false;
         data_collection_complete = true;
@@ -149,10 +149,10 @@ void init_adc() {
 
 
 void init_button() {
-    gpio_init(BUTTON_PIN);
-    gpio_set_dir(BUTTON_PIN, GPIO_IN);
-    gpio_pull_up(BUTTON_PIN);
-    gpio_set_irq_enabled_with_callback(BUTTON_PIN, 
+    gpio_init(MEASURE_PIN);
+    gpio_set_dir(MEASURE_PIN, GPIO_IN);
+    gpio_pull_up(MEASURE_PIN);
+    gpio_set_irq_enabled_with_callback(MEASURE_PIN, 
                                        GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
                                        true, 
                                        &gpio_interrupt_handler);
@@ -172,47 +172,122 @@ void init_encoder() {
 }
 
 
-void gpio_interrupt_handler(uint gpio, uint32_t events) {
-    static uint64_t last_button_event_time = 0; // Час для кнопки
-    uint64_t current_time = time_us_64();
-
-    // Обробка кнопки з антидребезгом
-    if (gpio == BUTTON_PIN) {
-        if (current_time - last_button_event_time < BUTTON_DEBOUNCE_US) {
-            printf("Button debounce rejected: %u\n", (uint32_t)(current_time - last_button_event_time));
-            return;
-        }
-        last_button_event_time = current_time;
-
-        printf("Event: %s, Time diff: %u\n", 
-               (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
-               (uint32_t)(current_time - last_button_event_time));
-        if (events & GPIO_IRQ_EDGE_FALL) {
-            printf("Calling button_start_pressed()\n");
-            button_start_pressed();
-        } else if (events & GPIO_IRQ_EDGE_RISE) {
-            printf("Calling button_released()\n");
-            button_released();
-        }
+/**
+ * Перевіряє, чи минув достатній час від останньої події для уникнення дребезгу.
+ * 
+ * @param current_time Поточний час у мікросекундах.
+ * @param last_event_time Час останньої події (змінна для оновлення).
+ * @param debounce_us Мінімальний інтервал між подіями у мікросекундах.
+ * @return bool True, якщо дребезг відхилено, false, якщо подія дозволена.
+ */
+bool debounce_check(uint64_t current_time, uint64_t* last_event_time, uint32_t debounce_us) {
+    if (current_time - *last_event_time < debounce_us) {
+        printf("Debounce rejected: %u\n", (uint32_t)(current_time - *last_event_time));
+        return true;
     }
+    *last_event_time = current_time;
+    return false;
+}
 
-    // Обробка енкодера без антидребезгу
-    if (gpio == ENCODER_CLK_PIN && encoder_active && !collecting_data) {
-        bool clk_state = gpio_get(ENCODER_CLK_PIN);
-        bool dt_state = gpio_get(ENCODER_DT_PIN);
+/**
+ * Перевіряє, чи переривання викликане енкодером і чи дозволена його обробка.
+ * 
+ * @param gpio Номер GPIO, який викликав переривання.
+ * @return bool True, якщо це енкодер і його можна обробляти, false інакше.
+ */
+bool is_encoder_event(uint gpio) {
+    return (gpio == ENCODER_CLK_PIN && encoder_active && !collecting_data);
+}
 
-        if (events & GPIO_IRQ_EDGE_FALL) {
-            if (dt_state != clk_state) { // Поворот вправо
-                if (encoder_slice_index < 39) encoder_slice_index++;
-            } else { // Поворот вліво
-                if (encoder_slice_index > 0) encoder_slice_index--;
-            }
-            encoder_update_needed = true; // Сигналізуємо про оновлення LCD
-            printf("Encoder slice %d\n", encoder_slice_index);
+/**
+ * Визначає напрямок обертання енкодера на основі стану CLK і DT.
+ * 
+ * @param clk_state Стан піна CLK енкодера.
+ * @param dt_state Стан піна DT енкодера.
+ * @return bool True, якщо поворот вправо, false, якщо вліво.
+ */
+bool is_encoder_rotation_right(bool clk_state, bool dt_state) {
+    return (dt_state != clk_state);
+}
+
+/**
+ * Обробляє поворот енкодера, оновлюючи індекс слайсу та сигналізуючи про потребу 
+ * оновлення дисплея. Збільшує або зменшує encoder_slice_index залежно від напрямку 
+ * обертання, визначеного станом CLK і DT.
+ * 
+ * @param events Події переривання (перевіряється GPIO_IRQ_EDGE_FALL).
+ */
+void handle_encoder_rotation(uint32_t events) {
+    bool clk_state = gpio_get(ENCODER_CLK_PIN);
+    bool dt_state = gpio_get(ENCODER_DT_PIN);
+
+    if (events & GPIO_IRQ_EDGE_FALL) {
+        if (is_encoder_rotation_right(clk_state, dt_state)) {
+            if (encoder_slice_index < 39) encoder_slice_index++;
+        } else {
+            if (encoder_slice_index > 0) encoder_slice_index--;
         }
+        encoder_update_needed = true;
+        /* printf("Encoder slice %d\n", encoder_slice_index); */
     }
 }
 
+/**
+ * Перевіряє, чи переривання викликане кнопкою.
+ * 
+ * @param gpio Номер GPIO, який викликав переривання.
+ * @return bool True, якщо це кнопка, false інакше.
+ */
+bool is_measure_pin_event(uint gpio) {
+    return (gpio == MEASURE_PIN);
+}
+
+/**
+ * Обробляє подію кнопки з антидребезгом, виводячи стан і викликаючи відповідні дії.
+ * Якщо антидребезг відхиляє подію, обробка припиняється. Інакше визначається, чи це 
+ * натискання (FALL) чи відпускання (RISE), і викликається відповідна функція.
+ * 
+ * @param current_time Поточний час у мікросекундах.
+ * @param last_event_time Час останньої події (змінна для оновлення).
+ * @param events Події переривання (FALL або RISE).
+ */
+void handle_measure_pin_event(uint64_t current_time, uint64_t* last_event_time, uint32_t events) {
+    if (debounce_check(current_time, last_event_time, BUTTON_DEBOUNCE_US)) {
+        return;
+    }
+
+    printf("Event: %s, Time diff: %u\n", 
+           (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
+           (uint32_t)(current_time - *last_event_time));
+    if (events & GPIO_IRQ_EDGE_FALL) {
+        printf("Calling measure_pin_pressed()\n");
+        measure_pin_pressed();
+    } else if (events & GPIO_IRQ_EDGE_RISE) {
+        printf("Calling measure_pin_released()\n");
+        measure_pin_released();
+    }
+}
+
+/**
+ * Обробляє переривання від GPIO, розподіляючи їх між кнопкою та енкодером.
+ * Для кнопки перевіряється антидребезг і викликається відповідна логіка.
+ * Для енкодера обробляється поворот без антидребезгу, оновлюється індекс слайсу.
+ * 
+ * @param gpio Номер GPIO, який викликав переривання.
+ * @param events Тип події (FALL або RISE).
+ */
+void gpio_interrupt_handler(uint gpio, uint32_t events) {
+    static uint64_t last_button_event_time = 0;
+    uint64_t current_time = time_us_64();
+
+    if (is_measure_pin_event(gpio)) {
+        handle_measure_pin_event(current_time, &last_button_event_time, events);
+    }
+
+    if (is_encoder_event(gpio)) {
+        handle_encoder_rotation(events);
+    }
+}
 
 // Функція для ініціалізації всіх систем
 void init_system() {
