@@ -48,6 +48,7 @@ struct repeating_timer timer; // Глобальна змінна для тайм
 uint32_t saved_slices_averages[40]; // Глобальний масив для збереження slices_averages
 int encoder_slice_index = 0;        // Поточний індекс для енкодера
 bool encoder_active = false;        // Флаг активації енкодера
+bool encoder_update_needed = false;
 
 uint8_t lcd_segment[8] = {
                   0b00000,
@@ -172,7 +173,7 @@ void init_encoder() {
 
 
 void gpio_interrupt_handler(uint gpio, uint32_t events) {
-    static uint64_t last_button_event_time = 0; // Час останньої події для кнопки
+    static uint64_t last_button_event_time = 0; // Час для кнопки
     uint64_t current_time = time_us_64();
 
     // Обробка кнопки з антидребезгом
@@ -203,15 +204,11 @@ void gpio_interrupt_handler(uint gpio, uint32_t events) {
         if (events & GPIO_IRQ_EDGE_FALL) {
             if (dt_state != clk_state) { // Поворот вправо
                 if (encoder_slice_index < 39) encoder_slice_index++;
-                printf("Encoder right: Slice %d = %u (scaled: %u)\n", 
-                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
-                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
             } else { // Поворот вліво
                 if (encoder_slice_index > 0) encoder_slice_index--;
-                printf("Encoder left: Slice %d = %u (scaled: %u)\n", 
-                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
-                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
             }
+            encoder_update_needed = true; // Сигналізуємо про оновлення LCD
+            printf("Encoder slice %d\n", encoder_slice_index);
         }
     }
 }
@@ -399,13 +396,51 @@ void lcd_hello() {
 }
 
 
+/**
+ * Перевіряє, чи потрібно оновити значення енкодера на LCD. 
+ * Повертає true, якщо енкодер активний, вимірювання не проводиться, 
+ * і є запит на оновлення дисплея.
+ * 
+ * @return bool Чи потрібно оновити LCD.
+ */
+bool should_update_encoder_display() {
+    return encoder_update_needed && encoder_active && !collecting_data;
+}
+
+
+/**
+ * Оновлює LCD-дисплей, виводячи поточне значення енкодера в вольтах 
+ * у форматі "index:volts" (наприклад, "14:1.234" або " 9:1.234") у рядку 0. 
+ * Рядок вирівнюється праворуч: якщо довжина < 8 символів, 
+ * останній символ на позиції 15, інакше починається з позиції 8.
+ */
+void update_encoder_display() {
+    float volts_value = saved_slices_averages[encoder_slice_index] * CONVERSION_FACTOR;
+    
+    char buffer[9]; // 8 символів + \0
+    sprintf(buffer, "%2d:%.3f", encoder_slice_index+1, volts_value);
+
+    /* int len = strlen(buffer); */
+    /* int start_pos = (len < 8) ? (15 - len + 1) : 8; */
+    int start_pos = 8;
+
+    lcd_setCursor(1, start_pos);
+    lcd_print(buffer);
+    
+    encoder_update_needed = false;
+}
+
+
 int main() {
     init_system();
     lcd_hello();
     while (1) {
         if (data_collection_complete) {
-            encoder_active = false; // Скидаємо перед обробкою даних
+            encoder_active = false;
             print_data();
+        }
+        if (should_update_encoder_display()) {
+            update_encoder_display();
         }
         sleep_ms(10);
     }
