@@ -27,7 +27,7 @@ uint8_t lcd_segment[8] = {
 };
 
 /**
- * Функція-обробник переривань для таймера
+ * Обробник переривань таймера
  */
 bool repeating_timer_callback(struct repeating_timer *t) {
 if (!collecting_data) {
@@ -46,7 +46,7 @@ if (!collecting_data) {
 }
 
 /**
- * Обробник переривання для кнопки
+ * Обробник переривання для кнопки вимірювання
  */
 void measure_pin_pressed() {
     if (!collecting_data) {
@@ -57,7 +57,7 @@ void measure_pin_pressed() {
 }
 
 /**
- * Обробник для відпускання кнопки
+ * Обробник відпускання кнопки вимірювання
  */
 void measure_pin_released() {
     if (collecting_data) {
@@ -115,7 +115,7 @@ void print_data() {
 }
 
 /**
- * Функція для ініціалізації АЦП
+ * Функція ініціалізації АЦП
  */
 void init_adc() {
   adc_init();
