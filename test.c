@@ -20,14 +20,22 @@
 #define LCD_SDA_PIN 16
 #define LCD_SCL_PIN 17
 
+
+#define ENCODER_DT_PIN 4            // DT енкодера на GPIO 4
+#define ENCODER_CLK_PIN 5           // CLK енкодера на GPIO 5
+
 const uint16_t ADC_NOISE = 2080;
 const int SAMPLE_SLICE = SAMPLE_ARRAY_SIZE / GRAPH_LENGTH;
 const float CONVERSION_FACTOR = 3.27f / (1 << 12);// Конвертаційний коефіцієнт для перетворення значення АЦП в вольти
+
 
 void timer_start();
 void stop_timer();
 void lcd_set_cursor(int, int);
 void draw_graph_on_lcd();
+void init_encoder();
+void gpio_interrupt_handler(uint gpio, uint32_t events);
+int scale_adc_value(uint32_t average);
 int is_noise(uint32_t value);
 
 uint16_t adc_values[SAMPLE_ARRAY_SIZE];            // Масив для зберігання зчитаних значень
@@ -36,6 +44,10 @@ int sample_index = 0; // Індекс для запису в масив
 bool collecting_data = false; // Флаг для контролю збирання даних
 bool data_collection_complete = false; // Флаг для позначення завершення збирання даних
 struct repeating_timer timer; // Глобальна змінна для таймера
+
+uint32_t saved_slices_averages[40]; // Глобальний масив для збереження slices_averages
+int encoder_slice_index = 0;        // Поточний індекс для енкодера
+bool encoder_active = false;        // Флаг активації енкодера
 
 uint8_t lcd_segment[8] = {
                   0b00000,
@@ -135,38 +147,73 @@ void init_adc() {
 }
 
 
-// Обробник переривань для кнопки
-void button_handler(uint gpio, uint32_t events) {
-    static uint64_t last_event_time = 0;
-    uint64_t current_time = time_us_64();
-    if (current_time - last_event_time < BUTTON_DEBOUNCE_US) {
-        printf("Debounce rejected: %u\n", (uint32_t)(current_time - last_event_time));
-        return;
-    }
-    printf("Event: %s, Time diff: %u\n", 
-           (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
-           (uint32_t)(current_time - last_event_time));
-    last_event_time = current_time;
-
-    if (events & GPIO_IRQ_EDGE_FALL) {
-        printf("Calling button_start_pressed()\n");
-        button_start_pressed();
-    } else if (events & GPIO_IRQ_EDGE_RISE) {
-        printf("Calling button_released()\n");
-        button_released();
-    }
-}
-
-
 void init_button() {
     gpio_init(BUTTON_PIN);
     gpio_set_dir(BUTTON_PIN, GPIO_IN);
     gpio_pull_up(BUTTON_PIN);
-    // Використовуємо єдиний обробник для обох подій
     gpio_set_irq_enabled_with_callback(BUTTON_PIN, 
-                                      GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
-                                      true, 
-                                      &button_handler);
+                                       GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
+                                       true, 
+                                       &gpio_interrupt_handler);
+}
+
+
+void init_encoder() {
+    gpio_init(ENCODER_DT_PIN);
+    gpio_set_dir(ENCODER_DT_PIN, GPIO_IN);
+    gpio_pull_up(ENCODER_DT_PIN);
+    gpio_init(ENCODER_CLK_PIN);
+    gpio_set_dir(ENCODER_CLK_PIN, GPIO_IN);
+    gpio_pull_up(ENCODER_CLK_PIN);
+    gpio_set_irq_enabled(ENCODER_CLK_PIN, 
+                         GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
+                         true); // Не перезаписуємо callback, лише вмикаємо переривання
+}
+
+
+void gpio_interrupt_handler(uint gpio, uint32_t events) {
+    static uint64_t last_button_event_time = 0; // Час останньої події для кнопки
+    uint64_t current_time = time_us_64();
+
+    // Обробка кнопки з антидребезгом
+    if (gpio == BUTTON_PIN) {
+        if (current_time - last_button_event_time < BUTTON_DEBOUNCE_US) {
+            printf("Button debounce rejected: %u\n", (uint32_t)(current_time - last_button_event_time));
+            return;
+        }
+        last_button_event_time = current_time;
+
+        printf("Event: %s, Time diff: %u\n", 
+               (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
+               (uint32_t)(current_time - last_button_event_time));
+        if (events & GPIO_IRQ_EDGE_FALL) {
+            printf("Calling button_start_pressed()\n");
+            button_start_pressed();
+        } else if (events & GPIO_IRQ_EDGE_RISE) {
+            printf("Calling button_released()\n");
+            button_released();
+        }
+    }
+
+    // Обробка енкодера без антидребезгу
+    if (gpio == ENCODER_CLK_PIN && encoder_active && !collecting_data) {
+        bool clk_state = gpio_get(ENCODER_CLK_PIN);
+        bool dt_state = gpio_get(ENCODER_DT_PIN);
+
+        if (events & GPIO_IRQ_EDGE_FALL) {
+            if (dt_state != clk_state) { // Поворот вправо
+                if (encoder_slice_index < 39) encoder_slice_index++;
+                printf("Encoder right: Slice %d = %u (scaled: %u)\n", 
+                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
+                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
+            } else { // Поворот вліво
+                if (encoder_slice_index > 0) encoder_slice_index--;
+                printf("Encoder left: Slice %d = %u (scaled: %u)\n", 
+                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
+                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
+            }
+        }
+    }
 }
 
 
@@ -175,6 +222,7 @@ void init_system() {
   stdio_init_all();
   init_adc();
   init_button();
+  init_encoder();
   lcd_init(LCD_SDA_PIN, LCD_SCL_PIN);
 }
 
@@ -293,36 +341,41 @@ void print_effective_slices( int sample_count, int slice_length) {
  * Відображає графік на LCD, використовуючи середні значення АЦП по слайсам.
  */
 void draw_graph_on_lcd() {
-    int effective_samples = sample_index; // Фактична кількість зібраних зразків
-    const int total_slices = 40;          // Загальна кількість слайсів (8 символів * 5 слайсів)
-    int slice_length = effective_samples / total_slices; // Довжина одного слайсу в зразках
-    if (slice_length < 1) slice_length = 1; // Гарантуємо, що слайс не буде меншим за 1
+    int effective_samples = sample_index;
+    const int total_slices = 40;
+    int slice_length = effective_samples / total_slices;
+    if (slice_length < 1) slice_length = 1;
     
     uint32_t slices_averages[total_slices];
     
     lcd_segment_clear();
     lcd_clear();
 
-    // Обчислюємо середні значення для 40 слайсів
     for (int i = 0; i < total_slices; i++) {
         int start_idx = i * slice_length;
         int end_idx = (i + 1) * slice_length;
-        if (end_idx > effective_samples) end_idx = effective_samples; // Не виходимо за межі зібраних даних
+        if (end_idx > effective_samples) end_idx = effective_samples;
         slices_averages[i] = (uint32_t)calculate_average(start_idx, end_idx);
+        saved_slices_averages[i] = slices_averages[i]; // Зберігаємо для енкодера
     }
 
-    // Виводимо графік: 8 символів, по 5 слайсів у кожному
     for (int i = 0, cursor_position = 0; i < total_slices; i++) {
         uint32_t scaled_value = scale_adc_value(slices_averages[i]);
-        int lcd_segment_position = i % 5; // Позиція стовпчика в межах одного символу (0-4)
+        int lcd_segment_position = i % 5;
         set_lcd_segment_row(lcd_segment_position, scaled_value);
-        if ((i + 1) % 5 == 0 || i == total_slices - 1) { // Кожен 5-й слайс або останній
+        if ((i + 1) % 5 == 0 || i == total_slices - 1) {
             lcd_segment_write(cursor_position++);
             lcd_segment_clear();
         }
     }
     print_slices_averages(slices_averages, total_slices);
     print_effective_slices(effective_samples, slice_length);
+
+    encoder_active = true; // Активуємо енкодер після вимірювання
+    encoder_slice_index = 0;
+    printf("Encoder activated. Initial slice: %d = %u (scaled: %u)\n", 
+           encoder_slice_index, saved_slices_averages[encoder_slice_index], 
+           scale_adc_value(saved_slices_averages[encoder_slice_index]));
 }
 
 
@@ -333,13 +386,14 @@ void lcd_hello() {
 
 
 int main() {
-  init_system();
-  lcd_hello();
-  while (1) {
-    if (data_collection_complete) {
-      print_data(); // Виводимо дані
+    init_system();
+    lcd_hello();
+    while (1) {
+        if (data_collection_complete) {
+            encoder_active = false; // Скидаємо перед обробкою даних
+            print_data();
+        }
+        sleep_ms(10);
     }
-    sleep_ms(10); // Чекаємо 10 мс, щоб не перевантажувати основний цикл
-  }
-  return 0;
+    return 0;
 }
