@@ -1,54 +1,17 @@
-#include <stdio.h>
-#include <string.h>
-
-#include "pico/stdlib.h"
-#include "hardware/adc.h"
-#include "hardware/gpio.h"
-#include "hardware/timer.h"
-
-#include "i2c-display-lib.h"
-
-#define ADC_PIN 26             // Використовуємо GPIO 26 для АЦП
-#define MEASURE_PIN 3          // Кнопка підключена до GPIO 21
-#define SAMPLE_ARRAY_SIZE 4000 // Кількість зразків для зберігання
-#define GRAPH_LENGTH 8
-#define GRAPH_SLICE_LENGTH 5
-#define TOTAL_SLICES (GRAPH_LENGTH * GRAPH_SLICE_LENGTH) // Загальна кількість слайсів для графіку
-#define SAMPLE_INTERVAL_MS 1   // Інтервал вибірки, 1 мс можна змінити за потреби
-#define ADC_NOISE_THRESHOLD 50 // Мінімальне відхилення від шуму
-#define BUTTON_DEBOUNCE_US 100000 // 100 мс
-
-#define LCD_SDA_PIN 16
-#define LCD_SCL_PIN 17
-
-
-#define ENCODER_DT_PIN 4            // DT енкодера на GPIO 4
-#define ENCODER_CLK_PIN 5           // CLK енкодера на GPIO 5
+#include "snd_analizer.h"
 
 const uint16_t ADC_NOISE = 2080;
 const int SAMPLE_SLICE = SAMPLE_ARRAY_SIZE / GRAPH_LENGTH;
-const float CONVERSION_FACTOR = 3.27f / (1 << 12);// Конвертаційний коефіцієнт для перетворення значення АЦП в вольти
+const float CONVERSION_FACTOR = 3.27f / (1 << 12);
 
-
-void timer_start();
-void stop_timer();
-void lcd_set_cursor(int, int);
-void draw_graph_on_lcd();
-void init_encoder();
-void gpio_interrupt_handler(uint gpio, uint32_t events);
-int scale_adc_value(uint32_t average);
-int is_noise(uint32_t value);
-
-uint16_t adc_values[SAMPLE_ARRAY_SIZE];            // Масив для зберігання зчитаних значень
-
-int sample_index = 0; // Індекс для запису в масив
-bool collecting_data = false; // Флаг для контролю збирання даних
-bool data_collection_complete = false; // Флаг для позначення завершення збирання даних
-struct repeating_timer timer; // Глобальна змінна для таймера
-
-uint32_t saved_slices_averages[TOTAL_SLICES]; // Масив для збереження slices_averages
-int encoder_slice_index = 0;        // Поточний індекс для енкодера
-bool encoder_active = false;        // Флаг активації енкодера
+uint16_t adc_values[SAMPLE_ARRAY_SIZE];
+int sample_index = 0;
+bool collecting_data = false;
+bool data_collection_complete = false;
+struct repeating_timer timer;
+uint32_t saved_slices_averages[TOTAL_SLICES];
+int encoder_slice_index = 0;
+bool encoder_active = false;
 bool encoder_update_needed = false;
 
 uint8_t lcd_segment[8] = {
@@ -62,7 +25,9 @@ uint8_t lcd_segment[8] = {
                   0b00000
 };
 
-// Функція-обробник переривань для таймера
+/**
+ * Функція-обробник переривань для таймера
+ */
 bool repeating_timer_callback(struct repeating_timer *t) {
 if (!collecting_data) {
         cancel_repeating_timer(t);
@@ -79,7 +44,9 @@ if (!collecting_data) {
     return true; // Продовжуємо таймер (він буде зупинений в основному циклі)
 }
 
-// Обробник переривання для кнопки
+/**
+ * Обробник переривання для кнопки
+ */
 void measure_pin_pressed() {
     if (!collecting_data) {
         timer_start();
@@ -88,13 +55,14 @@ void measure_pin_pressed() {
     }
 }
 
-
-// Обробник для відпускання кнопки
+/**
+ * Обробник для відпускання кнопки
+ */
 void measure_pin_released() {
     if (collecting_data) {
         collecting_data = false;
         data_collection_complete = true;
-        stop_timer();
+        timer_stop();
         printf("Button released, timer stopped\n");
     } else {
         printf("No data collection to stop\n");
@@ -108,7 +76,9 @@ void clear_adc_array() {
     }
 }
 
-// Функція для запуску таймера
+/**
+ * Функція для запуску таймера
+ */
 void timer_start() {
   collecting_data = true;
   sample_index = 0; // Скидаємо індекс
@@ -119,16 +89,19 @@ void timer_start() {
     printf("Data collection started.\n");
 }
 
-// Функція для зупинки таймера
-void stop_timer() {
+/**
+ * Функція для зупинки таймера
+ */
+void timer_stop() {
   cancel_repeating_timer(&timer);
   collecting_data = false;
   // sample_index = 0; // Опціонально, якщо хочете скинути індекс
   printf("Timer stopped.\n");
 }
 
-
-// Функція для виводу даних
+/**
+ * Функція для виводу даних
+ */
 void print_data() {
   printf("Data collection complete. Samples filled:\n");
   /* for(int i = 0; i < SAMPLE_ARRAY_SIZE; i++) { */
@@ -140,16 +113,16 @@ void print_data() {
   data_collection_complete = false; // Скидаємо флаг для наступного циклу збору даних
 }
 
-
-// Функція для ініціалізації АЦП
+/**
+ * Функція для ініціалізації АЦП
+ */
 void init_adc() {
   adc_init();
   adc_gpio_init(ADC_PIN);
   adc_select_input(0); // Вибираємо ADC0, який відповідає GPIO 26
 }
 
-
-void init_button() {
+void measure_pin_init() {
     gpio_init(MEASURE_PIN);
     gpio_set_dir(MEASURE_PIN, GPIO_IN);
     gpio_pull_up(MEASURE_PIN);
@@ -158,7 +131,6 @@ void init_button() {
                                        true, 
                                        &gpio_interrupt_handler);
 }
-
 
 void init_encoder() {
     gpio_init(ENCODER_DT_PIN);
@@ -171,7 +143,6 @@ void init_encoder() {
                          GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
                          true); // Не перезаписуємо callback, лише вмикаємо переривання
 }
-
 
 /**
  * Перевіряє, чи минув достатній час від останньої події для уникнення дребезгу.
@@ -290,11 +261,13 @@ void gpio_interrupt_handler(uint gpio, uint32_t events) {
     }
 }
 
-// Функція для ініціалізації всіх систем
+/**
+ * Функція для ініціалізації всіх систем
+ */
 void init_system() {
   stdio_init_all();
   init_adc();
-  init_button();
+  measure_pin_init();
   init_encoder();
   lcd_init(LCD_SDA_PIN, LCD_SCL_PIN);
 }
@@ -313,7 +286,6 @@ int is_noise(uint32_t value) {
   return (value < ADC_NOISE + ADC_NOISE_THRESHOLD);
 }
 
-
 /**
  * Масштабує середнє значення АЦП у діапазон 1-8.
  * 
@@ -325,7 +297,6 @@ int scale_adc_value(uint32_t average) {
     if (average < ADC_NOISE) return 1;
     return ((average - ADC_NOISE) * 7 + (max_value - ADC_NOISE) / 2) / (max_value - ADC_NOISE) + 1;
 }
-
 
 /**
  * Малює вертикальний стовпчик на LCD-екрані.
@@ -354,7 +325,6 @@ void set_lcd_segment_row(int pos, int value) {
   }
 }
 
-
 /**
  * Записує поточний вміст масиву lcd_segment на екран LCD.
  *
@@ -370,7 +340,6 @@ void lcd_segment_write(int cursor_position) {
   lcd_write(cursor_position);
 }
 
-
 uint32_t calculate_average(int from, int to) {
     uint32_t sum = 0;
     int count = 0;
@@ -383,7 +352,6 @@ uint32_t calculate_average(int from, int to) {
 
     return sum / count;
 }
-
 
 /**
  * Виводить у термінал середні значення кожного слайсу.
@@ -489,7 +457,6 @@ void lcd_hello() {
   lcd_print("Press button");
 }
 
-
 /**
  * Перевіряє, чи потрібно оновити значення енкодера на LCD. 
  * Повертає true, якщо енкодер активний, вимірювання не проводиться, 
@@ -500,7 +467,6 @@ void lcd_hello() {
 bool should_update_encoder_display() {
     return encoder_update_needed && encoder_active && !collecting_data;
 }
-
 
 /**
  * Оновлює LCD-дисплей, виводячи поточне значення енкодера в вольтах 
@@ -523,7 +489,6 @@ void update_encoder_display() {
     
     encoder_update_needed = false;
 }
-
 
 int main() {
     init_system();
