@@ -2,7 +2,7 @@ compile:
 	cd build && make
 
 upload: compile
-	cd build && picotool load -F test.uf2 && picotool reboot -f
+	cd build && picotool load -F snd_analizer.uf2 && picotool reboot -f
 
 reboot:
 	picotool reboot -f
