@@ -1,0 +1,68 @@
+** Encoder
+Давай підіб'ємо нашу роботу. Є код, який під час натискання кнопки зчитує аналоговий вхід і будує графік на led 16x2 i2c дисплеї.
+*** DONE Виводимо значення в консоль
+Тепер потрібно інтегрувати енкодер (DT на GPIO4, CLK на GPIO5) у цей код так, щоб після завершення вимірювання (коли data_collection_complete стає true) поворот енкодера вправо виводив значення з масиву slices_averages по одному зліва направо, а поворот вліво — справа наліво. Коли відбувається вимірювання або поки нема результатів вимірювання, обробка енкодера повинна ігноруватися.
+*** DONE Виводимо значення на lcd
+Тепер виведемо начення на LCD-дисплей 16x2 L2C.
+**** DONE Змінимо вивід void print_effective_slices
+#+BEGIN_SRC с
+void print_effective_slices( int sample_count, int slice_length) {
+  printf("Effective samples count: %d; sclice length %d\n", sample_count, slice_length);
+  char buffer1[16]; sprintf(buffer1, "%d", sample_count);
+  char buffer2[16]; sprintf(buffer2, "%d", slice_length);
+  lcd_setCursor(1, 0); lcd_print("Cnt:"); lcd_setCursor(1, 4); lcd_print(buffer1);
+  lcd_setCursor(1, 9); lcd_print("L:"); lcd_setCursor(1, 11); lcd_print(buffer2);
+}
+#+END_SRC
+Ми виводимо данні на дисплей викликаючи void lcd_print(const char *s). Давай виведемо sample_count та slice_length  в лінію 0 починачи з позиції 8. Якщо загальна кількість символів менше 8 здвинути їх якможна правіше. Розділи їх символом /.
+**** DONE Додамо вивід значень на lcd-екран при прокручуванні енкодера
+Вивід графіка на lcd-екран починається з позиції 0, 0 і займає 8 символів.
+Виведення значення в консоль під час прокручування енкодера відбувається в функції 
+#+BEGIN_SRC с
+  void gpio_interrupt_handler(uint gpio, uint32_t events) {
+    static uint64_t last_button_event_time = 0; // Час останньої події для кнопки
+    uint64_t current_time = time_us_64();
+
+    // Обробка кнопки з антидребезгом
+    if (gpio == BUTTON_PIN) {
+        if (current_time - last_button_event_time < BUTTON_DEBOUNCE_US) {
+            printf("Button debounce rejected: %u\n", (uint32_t)(current_time - last_button_event_time));
+            return;
+        }
+        last_button_event_time = current_time;
+
+        printf("Event: %s, Time diff: %u\n", 
+               (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
+               (uint32_t)(current_time - last_button_event_time));
+        if (events & GPIO_IRQ_EDGE_FALL) {
+            printf("Calling button_start_pressed()\n");
+            button_start_pressed();
+        } else if (events & GPIO_IRQ_EDGE_RISE) {
+            printf("Calling button_released()\n");
+            button_released();
+        }
+    }
+
+    // Обробка енкодера без антидребезгу
+    if (gpio == ENCODER_CLK_PIN && encoder_active && !collecting_data) {
+        bool clk_state = gpio_get(ENCODER_CLK_PIN);
+        bool dt_state = gpio_get(ENCODER_DT_PIN);
+
+        if (events & GPIO_IRQ_EDGE_FALL) {
+            if (dt_state != clk_state) { // Поворот вправо
+                if (encoder_slice_index < 39) encoder_slice_index++;
+                printf("Encoder right: Slice %d = %u (scaled: %u)\n", 
+                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
+                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
+            } else { // Поворот вліво
+                if (encoder_slice_index > 0) encoder_slice_index--;
+                printf("Encoder left: Slice %d = %u (scaled: %u)\n", 
+                       encoder_slice_index, saved_slices_averages[encoder_slice_index], 
+                       scale_adc_value(saved_slices_averages[encoder_slice_index]));
+            }
+        }
+    }
+}
+#+END_SRC
+
+Давай виведемо значення в вольтах на lcd-екран. У нас вже є коефіцієнт const float CONVERSION_FACTOR; в форматі encoder_slice_index:volts_value. volts_value займе у нас 5 позицій, напр. 2.148. Вирівнюємо, аналогічно попередньому, максимально вправо. Отже, якщо у нас буде вивід 1:1.231, то буде lcd_setCursor(0, 15-7+1), а якщо вивід 14:1.111, то lcd_setCursor(0, 15-7+1);
