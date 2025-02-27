@@ -225,10 +225,7 @@ bool is_measure_pin_event(uint gpio) {
  * @param events Події переривання (FALL або RISE).
  */
 void handle_measure_pin_event(uint64_t current_time, uint64_t* last_event_time, uint32_t events) {
-    if (debounce_check(current_time, last_event_time, BUTTON_DEBOUNCE_US)) {
-        return;
-    }
-
+    /* if (debounce_check(current_time, last_event_time, BUTTON_DEBOUNCE_US)) { return; } */
     printf("Event: %s, Time diff: %u\n", 
            (events & GPIO_IRQ_EDGE_FALL) ? "FALL" : "RISE", 
            (uint32_t)(current_time - *last_event_time));
