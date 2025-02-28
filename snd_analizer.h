@@ -12,7 +12,7 @@
 
 // Константи
 #define ADC_PIN 26             // Використовуємо GPIO 26 для АЦП
-#define MEASURE_PIN 3          // Кнопка підключена до GPIO 3
+#define MEASURE_PIN 21          // Кнопка підключена до GPIO 21
 #define SAMPLE_ARRAY_SIZE 4000 // Кількість зразків для зберігання
 #define GRAPH_LENGTH 8
 #define GRAPH_SLICE_LENGTH 5
