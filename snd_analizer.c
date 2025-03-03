@@ -15,6 +15,8 @@ int encoder_slice_index = 0;
 bool encoder_active = false;
 bool encoder_update_needed = false;
 
+int prev_encoder_slice_index;
+
 uint8_t lcd_segment[8] = {
                   0b00000,
                   0b00000,
@@ -298,29 +300,38 @@ int scale_adc_value(uint32_t average) {
 
 /**
  * Малює вертикальний стовпчик на LCD-екрані.
- * 
- * @param lcd_segment Масив, що представляє екрани LCD, де кожен байт відповідає одному рядку.
- * @param pos Позиція стовпчика (0-4), де 0 - найлівіший стовпчик.
- * @param value Висота стовпчика (0-8), де 8 - повний стовпчик.
- * 
- * Функція малює стовпчик на екрані, де кожен піксель стовпчика представлений бітом 
- * у масиві lcd_segment. Висота стовпчика визначається параметром value, а позиція 
- * на екрані - параметром pos.
+ * @param pos Позиція стовпчика (0–4).
+ * @param value Висота стовпчика (0–8).
+ * @param enable_pointer Чи вмикати/вимикати піксель-вказівник (залежно від POINTER_POSITION).
  */
-void set_lcd_segment_row(int pos, int value) {
-  if (pos < 0) pos = 0;
-  if (pos > 4) pos = 4;
+void set_lcd_segment_row(int pos, int value, bool enable_pointer) {
+    if (pos < 0) pos = 0;
+    if (pos > 4) pos = 4;
+    if (value > 8) value = 8;
+    if (value < 0) value = 0;
 
-  if (value > 8) value = 8;
-  if (value < 0) value = 0;
+    int bit_position = 4 - pos; // Позиція біта в байті (зліва направо)
+    int start_row = 8 - value;  // Початок малювання стовпчика
 
-  int bit_position = 4 - pos; // Перетворення позиції в індекс біта
-                              // (4-pos, бо біти нумеруються зліва направо)
-  int start_row = 8 - value;  // Визначаємо, з якого рядка починати малювати
-                              // стовпчик (0 - початок, 7 - кінець)
-  for (int i = 7; i >= start_row; i--) {
-    lcd_segment[i] |= (1 << bit_position); // Встановлюємо біт на позиції bit_position
-  }
+    // Заповнюємо стовпчик відповідно до висоти
+    for (int i = 7; i >= start_row; i--) {
+        lcd_segment[i] |= (1 << bit_position); // Увімкнемо біт
+    }
+
+    // Обробка пікселя-вказівника для активного слайсу
+    if (enable_pointer) {
+#if POINTER_POSITION == 7
+        // Вимикаємо нижній піксель (рядок 7), якщо він був увімкнений
+        if (value > 0) {
+            lcd_segment[7] &= ~(1 << bit_position);
+        }
+#elif POINTER_POSITION == 0
+        // Вмикаємо верхній піксель (рядок 0) завжди
+        lcd_segment[0] |= (1 << bit_position);
+#else
+#error "POINTER_POSITION must be 7 (bottom) or 0 (top)"
+#endif
+    }
 }
 
 /**
@@ -420,7 +431,7 @@ void display_graph(uint32_t* slices_averages) {
     for (int i = 0, cursor_position = 0; i < TOTAL_SLICES; i++) {
         uint32_t scaled_value = scale_adc_value(slices_averages[i]);
         int lcd_segment_position = i % GRAPH_SLICE_LENGTH;
-        set_lcd_segment_row(lcd_segment_position, scaled_value);
+        set_lcd_segment_row(lcd_segment_position, scaled_value, false); // Без вимкнення
         if ((i + 1) % GRAPH_SLICE_LENGTH == 0 || i == TOTAL_SLICES - 1) {
             lcd_segment_write(cursor_position++);
             lcd_segment_clear();
@@ -448,6 +459,7 @@ void draw_graph_on_lcd() {
 
     encoder_active = true;
     encoder_slice_index = 0;
+    prev_encoder_slice_index = -1; // Скидаємо попередній індекс
     /* printf("Encoder activated. Initial slice: %d = %u (scaled: %u)\n",  */
     /*        encoder_slice_index, saved_slices_averages[encoder_slice_index],  */
     /*        scale_adc_value(saved_slices_averages[encoder_slice_index])); */
@@ -456,6 +468,40 @@ void draw_graph_on_lcd() {
 void lcd_hello() {
   lcd_setCursor(0, 0);
   lcd_print("Press button");
+}
+
+/**
+ * Оновлює символ на LCD, вимикаючи піксель-вказівник для поточного слайсу.
+ * @param slice_index Індекс поточного слайсу (0–39).
+ * @param prev_slice_index Індекс попереднього слайсу (для відновлення).
+ */
+void update_slice_column(int slice_index, int prev_slice_index) {
+    int cursor_position = slice_index / GRAPH_SLICE_LENGTH; // Номер символу (0–7)
+    int lcd_segment_position = slice_index % GRAPH_SLICE_LENGTH; // Позиція стовпчика (0–4)
+
+    lcd_segment_clear();
+
+    for (int i = 0; i < GRAPH_SLICE_LENGTH; i++) {
+        int current_slice = cursor_position * GRAPH_SLICE_LENGTH + i;
+        if (current_slice >= TOTAL_SLICES) break;
+        uint32_t height = scale_adc_value(saved_slices_averages[current_slice]);
+        // Вимикаємо піксель-вказівник тільки для активного слайсу
+        set_lcd_segment_row(i, height, i == lcd_segment_position);
+    }
+
+    lcd_segment_write(cursor_position);
+
+    if (prev_slice_index >= 0 && (prev_slice_index / GRAPH_SLICE_LENGTH) != cursor_position) {
+        int prev_cursor_position = prev_slice_index / GRAPH_SLICE_LENGTH;
+        lcd_segment_clear();
+        for (int i = 0; i < GRAPH_SLICE_LENGTH; i++) {
+            int current_slice = prev_cursor_position * GRAPH_SLICE_LENGTH + i;
+            if (current_slice >= TOTAL_SLICES) break;
+            uint32_t height = scale_adc_value(saved_slices_averages[current_slice]);
+            set_lcd_segment_row(i, height, false); // Без вимкнення пікселя
+        }
+        lcd_segment_write(prev_cursor_position);
+    }
 }
 
 /**
@@ -483,6 +529,10 @@ void update_encoder_display() {
     lcd_print(buffer);
 
     encoder_update_needed = false;
+
+    // Оновлюємо стовпчик для поточного і попереднього слайсу
+    update_slice_column(encoder_slice_index, prev_encoder_slice_index);
+    prev_encoder_slice_index = encoder_slice_index; // Зберігаємо поточний індекс як попередній
 }
 
 int main() {

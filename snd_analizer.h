@@ -24,6 +24,7 @@
 #define LCD_SCL_PIN 17
 #define ENCODER_DT_PIN 4       // DT енкодера на GPIO 4
 #define ENCODER_CLK_PIN 5      // CLK енкодера на GPIO 5
+#define POINTER_POSITION 0     // 7 = нижній піксель, 0 = верхній піксель
 
 // Статичні константи
 extern const uint16_t ADC_NOISE;
@@ -67,7 +68,7 @@ bool is_measure_pin_event(uint gpio);
 void handle_measure_pin_event(uint64_t current_time, uint64_t* last_event_time, uint32_t events);
 void init_system(void);
 void lcd_segment_clear(void);
-void set_lcd_segment_row(int pos, int value);
+void set_lcd_segment_row(int pos, int value, bool disable_bottom);
 void lcd_segment_write(int cursor_position);
 uint32_t calculate_average(int from, int to);
 void print_slices_averages(uint32_t slices_averages[], int slices_count);
