@@ -299,38 +299,45 @@ int scale_adc_value(uint32_t average) {
 }
 
 /**
+ * Обробляє піксель-вказівник для стовпчика на LCD.
+ * @param bit_position Позиція біта в байті (0–4), що відповідає стовпчику.
+ * @param value Висота стовпчика (0–7).
+ */
+void handle_pointer_pixel(int bit_position, int value) {
+#if POINTER_POSITION == 7
+    // Вимикаємо нижній піксель, рядок 7, якщо він був увімкнений
+    if (value > 0) {
+        lcd_segment[7] &= ~(1 << bit_position);
+    }
+#elif POINTER_POSITION == 0
+    // Вмикаємо верхній піксель, рядок 0
+    lcd_segment[0] |= (1 << bit_position);
+#else
+#error "POINTER_POSITION must be 7 (bottom) or 0 (top)"
+#endif
+}
+
+/**
  * Малює вертикальний стовпчик на LCD-екрані.
  * @param pos Позиція стовпчика (0–4).
- * @param value Висота стовпчика (0–8).
+ * @param value Висота стовпчика (0–7).
  * @param enable_pointer Чи вмикати/вимикати піксель-вказівник (залежно від POINTER_POSITION).
  */
 void set_lcd_segment_row(int pos, int value, bool enable_pointer) {
     if (pos < 0) pos = 0;
     if (pos > 4) pos = 4;
-    if (value > 8) value = 8;
+    if (value > 7) value = 7;  // Максимальна висота — 7, а не 8
     if (value < 0) value = 0;
 
     int bit_position = 4 - pos; // Позиція біта в байті (зліва направо)
     int start_row = 8 - value;  // Початок малювання стовпчика
 
-    // Заповнюємо стовпчик відповідно до висоти
-    for (int i = 7; i >= start_row; i--) {
+    for (int i = 7; i >= start_row; i--) { // Заповнюємо стовпчик відповідно до висоти
         lcd_segment[i] |= (1 << bit_position); // Увімкнемо біт
     }
 
-    // Обробка пікселя-вказівника для активного слайсу
     if (enable_pointer) {
-#if POINTER_POSITION == 7
-        // Вимикаємо нижній піксель (рядок 7), якщо він був увімкнений
-        if (value > 0) {
-            lcd_segment[7] &= ~(1 << bit_position);
-        }
-#elif POINTER_POSITION == 0
-        // Вмикаємо верхній піксель (рядок 0) завжди
-        lcd_segment[0] |= (1 << bit_position);
-#else
-#error "POINTER_POSITION must be 7 (bottom) or 0 (top)"
-#endif
+        handle_pointer_pixel(bit_position, value);
     }
 }
 

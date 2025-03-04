@@ -68,6 +68,7 @@ bool is_measure_pin_event(uint gpio);
 void handle_measure_pin_event(uint64_t current_time, uint64_t* last_event_time, uint32_t events);
 void init_system(void);
 void lcd_segment_clear(void);
+void handle_pointer_pixel(int bit_position, int value);
 void set_lcd_segment_row(int pos, int value, bool disable_bottom);
 void lcd_segment_write(int cursor_position);
 uint32_t calculate_average(int from, int to);
