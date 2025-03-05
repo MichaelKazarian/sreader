@@ -401,7 +401,7 @@ void print_slices_averages(uint32_t slices_averages[], int slices_count) {
  * @param sample_count Кількість зібраних зразків (макс. 4000, 4 символи).
  * @param slice_length Довжина одного слайсу (макс. 100, 3 символи).
  */
-void display_effective_slices(int sample_count, int slice_length) {
+void display_slice_info(int sample_count, int slice_length) {
   printf("Effective samples count: %d; slice length %d\n", sample_count, slice_length);
 
   char buffer[9]; // 8 символів + \0, для макс. "4000/100"
@@ -471,7 +471,7 @@ void draw_graph_on_lcd() {
     calculate_slice_averages(effective_samples, slice_length, slices_averages, saved_slices_averages);
     display_graph(slices_averages);
     print_slices_averages(slices_averages, TOTAL_SLICES);
-    display_effective_slices(effective_samples, slice_length);
+    display_slice_info(effective_samples, slice_length);
 
     analyze_peaks(slice_length);
     
@@ -559,8 +559,8 @@ void update_encoder_display() {
 void display_peak_info() {
     lcd_setCursor(0, 8);
     lcd_print("        ");
-    display_effective_slices(peak_slices[current_peak_index]+1,
-                             peak_durations[current_peak_index]);  
+    display_slice_info(peak_slices[current_peak_index]+1,
+                       peak_durations[current_peak_index]);
 }
 
 void analyze_peaks(int slice_length) {

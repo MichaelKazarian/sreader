@@ -80,7 +80,7 @@ void set_lcd_segment_row(int pos, int value, bool disable_bottom);
 void lcd_segment_write(int cursor_position);
 uint32_t calculate_average(int from, int to);
 void print_slices_averages(uint32_t slices_averages[], int slices_count);
-void display_effective_slices(int sample_count, int slice_length);
+void display_slice_info(int sample_count, int slice_length);
 void calculate_slice_averages(int effective_samples, int slice_length, 
                               uint32_t* slices_averages, uint32_t* saved_slices_averages);
 void display_graph(uint32_t* slices_averages);
