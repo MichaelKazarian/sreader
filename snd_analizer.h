@@ -24,7 +24,7 @@
 #define LCD_SCL_PIN 17
 #define ENCODER_DT_PIN 4       // DT енкодера на GPIO 4
 #define ENCODER_CLK_PIN 5      // CLK енкодера на GPIO 5
-#define POINTER_POSITION 0     // 7 = нижній піксель, 0 = верхній піксель
+#define POINTER_POSITION 7     // 7 = нижній піксель, 0 = верхній піксель
 
 #define SAMPLE_INTERVAL_MS 1 // 1 мс = 1000 Гц
 #define MIN_PEAK_DURATION 10 // 0.01 с = 10 записів при 1000 Гц
