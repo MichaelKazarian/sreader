@@ -539,11 +539,18 @@ bool should_update_encoder_display() {
     return encoder_update_needed && encoder_active && !collecting_data;
 }
 
+/**
+ * Оновлює відображення інформації про поточний слайс на LCD-дисплеї.
+ * Виводить номер слайсу (з додаванням 1 для зручності), середнє значення в вольтах
+ * та максимальне значення в вольтах у форматі "XX/Y.ZZZ/W.QQQ" у рядку 1, позиція (1, 2).
+ * Викликає display_peak_info() для відображення даних про пік у рядку 0.
+ * Скидає прапорець оновлення енкодера та оновлює графічне відображення стовпчика слайсу.
+ */
 void update_encoder_display() {
-    float volts_value = saved_slices_averages[encoder_slice_index] * CONVERSION_FACTOR;
-    float max_value = saved_slices_maximums[encoder_slice_index] * CONVERSION_FACTOR;
+    float volts_value = adc_to_volt(saved_slices_averages[encoder_slice_index]);
+    float max_value = adc_to_volt(saved_slices_maximums[encoder_slice_index]);
 
-    char buffer[14];
+    char buffer[14]; // "номер слайсу / середнє / максимум"
     sprintf(buffer, "%2d/%.3f/%.3f", encoder_slice_index + 1, volts_value, max_value);
     int start_pos = 2;
     lcd_setCursor(1, start_pos);
@@ -556,6 +563,12 @@ void update_encoder_display() {
     prev_encoder_slice_index = encoder_slice_index; // Зберігаємо поточний індекс як попередній
 }
 
+/**
+ * Відображає інформацію про поточний пік на LCD-дисплеї у рядку 0.
+ * Спочатку очищає область у позиції (0, 8) пробілами, щоб видалити попередній текст,
+ * потім викликає display_slice_info() для виведення номера слайсу піку (з додаванням 1)
+ * та його тривалості у форматі "Slice X:Yms" у позицію (0, 0).
+ */
 void display_peak_info() {
     lcd_setCursor(0, 8);
     lcd_print("        ");
@@ -580,14 +593,14 @@ int calculate_peak_duration(int slice_start, int slice_end) {
     int peak_end = slice_end;
 
     // Розширюємо межі піку ліворуч
-    while (peak_start > 0 && 
-           (adc_values[peak_start - 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+    while (peak_start > 0 &&
+           adc_to_volt(adc_values[peak_start - 1]) > PEAK_THRESHOLD) {
         peak_start--;
     }
 
     // Розширюємо межі піку праворуч
-    while (peak_end < SAMPLE_ARRAY_SIZE - 1 && 
-           (adc_values[peak_end + 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+    while (peak_end < SAMPLE_ARRAY_SIZE - 1 &&
+           adc_to_volt(adc_values[peak_end + 1]) > PEAK_THRESHOLD) {
         peak_end++;
     }
 
@@ -612,7 +625,7 @@ void analyze_peaks(int slice_length) {
     const float PEAK_THRESHOLD = 2.50f; // Поріг значущості піку
 
     for (int i = 0; i < TOTAL_SLICES; i++) {
-        float avg_volt = saved_slices_averages[i] * CONVERSION_FACTOR;
+      float avg_volt = adc_to_volt(saved_slices_averages[i]);
 
         if (avg_volt > PEAK_THRESHOLD) {
             if (peak_count < TOTAL_SLICES) {
@@ -659,6 +672,17 @@ void move_to_next_peak() {
     int duration = peak_durations[current_peak_index];
     encoder_update_needed = true;
     printf("Moved to peak at slice %d, value %d\n", encoder_slice_index, duration);
+}
+
+/**
+ * Конвертує значення АЦП у вольти, використовуючи коефіцієнт перетворення CONVERSION_FACTOR.
+ * Призначена для переведення сирих даних АЦП (uint16_t) у фізичну величину напруги.
+ *
+ * @param adc_value Значення АЦП (0–4095 для 12-бітного АЦП).
+ * @return Значення напруги у вольтах.
+ */
+float adc_to_volt(uint16_t adc_value) {
+  return adc_value * CONVERSION_FACTOR;
 }
 
 int main() {

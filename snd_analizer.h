@@ -92,5 +92,6 @@ void move_to_next_peak();
 int calculate_peak_duration(int slice_start, int slice_end);
 void analyze_peaks(int slice_length);
 void display_peak_info();
+float adc_to_volt(uint16_t adc_value);
 
 #endif // SND_ANALIZER_H
