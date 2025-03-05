@@ -15,7 +15,12 @@ int encoder_slice_index = 0;
 bool encoder_active = false;
 bool encoder_update_needed = false;
 
+int peak_slices[TOTAL_SLICES]; // Індекси слайсів із максимумами
+int peak_count = 0;            // Кількість максимумів
+int current_peak_index = -1;   // Поточний індекс у peak_slices
+
 int prev_encoder_slice_index;
+int peak_durations[TOTAL_SLICES]; // Тривалості піків у мс
 
 uint8_t lcd_segment[8] = {
                   0b00000,
@@ -71,7 +76,6 @@ void measure_pin_released() {
         printf("No data collection to stop\n");
     }
 }
-
 
 void clear_adc_array() {
     for (int i = 0; i < SAMPLE_ARRAY_SIZE; i++) {
@@ -259,6 +263,10 @@ void gpio_interrupt_handler(uint gpio, uint32_t events) {
     if (is_encoder_event(gpio)) {
         handle_encoder_rotation(events);
     }
+
+    if (gpio == NEXT_PEAK_PIN && (events & GPIO_IRQ_EDGE_FALL)) {
+        move_to_next_peak();
+    }
 }
 
 /**
@@ -269,6 +277,7 @@ void init_system() {
   init_adc();
   measure_pin_init();
   init_encoder();
+  init_next_peak_pin();
   lcd_init(LCD_SDA_PIN, LCD_SCL_PIN);
 }
 
@@ -464,6 +473,14 @@ void draw_graph_on_lcd() {
     print_slices_averages(slices_averages, TOTAL_SLICES);
     display_effective_slices(effective_samples, slice_length);
 
+    analyze_peaks(slice_length);
+    
+    // Виведення кількості максимумів (2 символи)
+    char buffer[3];
+    sprintf(buffer, "%d", peak_count);
+    lcd_setCursor(1, 0);
+    lcd_print(buffer);
+    
     encoder_active = true;
     encoder_slice_index = 0;
     prev_encoder_slice_index = -1; // Скидаємо попередній індекс
@@ -528,18 +545,89 @@ void update_encoder_display() {
 
     char buffer[14];
     sprintf(buffer, "%2d/%.3f/%.3f", encoder_slice_index + 1, volts_value, max_value);
-    /* int len = strlen(buffer); */
-    /* int start_pos = (len < 8) ? (15 - len + 1) : 8; */
     int start_pos = 2;
-
     lcd_setCursor(1, start_pos);
     lcd_print(buffer);
-
+    display_peak_info();
     encoder_update_needed = false;
 
     // Оновлюємо стовпчик для поточного і попереднього слайсу
     update_slice_column(encoder_slice_index, prev_encoder_slice_index);
     prev_encoder_slice_index = encoder_slice_index; // Зберігаємо поточний індекс як попередній
+}
+
+void display_peak_info() {
+    lcd_setCursor(0, 8);
+    lcd_print("        ");
+    display_effective_slices(peak_slices[current_peak_index]+1,
+                             peak_durations[current_peak_index]);  
+}
+
+void analyze_peaks(int slice_length) {
+    peak_count = 0;
+    const float PEAK_THRESHOLD = 2.50f; // Поріг значущості піку
+
+    for (int i = 0; i < TOTAL_SLICES; i++) {
+        float avg_volt = saved_slices_averages[i] * CONVERSION_FACTOR;
+
+        if (avg_volt > PEAK_THRESHOLD) {
+            if (peak_count < TOTAL_SLICES) {
+                peak_slices[peak_count] = i;
+
+                int slice_start = i * slice_length;
+                int slice_end = (i + 1) * slice_length - 1;
+                if (slice_end >= SAMPLE_ARRAY_SIZE) slice_end = SAMPLE_ARRAY_SIZE - 1;
+
+                int peak_start = slice_start;
+                int peak_end = slice_end;
+
+                while (peak_start > 0 && 
+                       (adc_values[peak_start - 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+                    peak_start--;
+                }
+
+                while (peak_end < SAMPLE_ARRAY_SIZE - 1 && 
+                       (adc_values[peak_end + 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+                    peak_end++;
+                }
+
+                int duration = peak_end - peak_start + 1; // У записах
+                int duration_ms = duration; // У мс (1 запис = 1 мс)
+                if (duration_ms < MIN_PEAK_DURATION) duration_ms = MIN_PEAK_DURATION;
+
+                peak_durations[peak_count] = duration_ms; // Зберігаємо тривалість
+                printf("Peak at slice %d: %.3f V, duration %d ms\n", 
+                       i, avg_volt, duration_ms);
+
+                peak_count++;
+
+                int next_slice = (peak_end + 1) / slice_length;
+                if (next_slice > i) i = next_slice - 1;
+            }
+        }
+    }
+
+    printf("Found %d peaks: ", peak_count);
+    for (int j = 0; j < peak_count; j++) {
+        printf("%d ", peak_slices[j]);
+    }
+    printf("\n");
+}
+
+void init_next_peak_pin() {
+    gpio_init(NEXT_PEAK_PIN);
+    gpio_set_dir(NEXT_PEAK_PIN, GPIO_IN);
+    gpio_pull_up(NEXT_PEAK_PIN);
+    gpio_set_irq_enabled_with_callback(NEXT_PEAK_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_interrupt_handler);
+}
+
+void move_to_next_peak() {
+    if (peak_count == 0) return;
+    current_peak_index = (current_peak_index + 1) % peak_count;
+    encoder_slice_index = peak_slices[current_peak_index];
+    int duration = peak_durations[current_peak_index];
+    encoder_update_needed = true;
+    printf("Moved to peak at slice %d, value %d\n", encoder_slice_index, duration);
 }
 
 int main() {

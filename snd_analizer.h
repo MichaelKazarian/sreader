@@ -26,6 +26,10 @@
 #define ENCODER_CLK_PIN 5      // CLK енкодера на GPIO 5
 #define POINTER_POSITION 0     // 7 = нижній піксель, 0 = верхній піксель
 
+#define SAMPLE_INTERVAL_MS 1 // 1 мс = 1000 Гц
+#define MIN_PEAK_DURATION 10 // 0.01 с = 10 записів при 1000 Гц
+#define NEXT_PEAK_PIN 3 // GPIO3 для навігації по максимумах
+
 // Статичні константи
 extern const uint16_t ADC_NOISE;
 extern const int SAMPLE_SLICE;
@@ -43,6 +47,9 @@ extern int encoder_slice_index;
 extern bool encoder_active;
 extern bool encoder_update_needed;
 extern uint8_t lcd_segment[8];
+extern int peak_slices[TOTAL_SLICES];
+extern int peak_count;
+extern int current_peak_index;
 
 // Прототипи функцій
 void timer_start(void);
@@ -80,5 +87,9 @@ void display_graph(uint32_t* slices_averages);
 void lcd_hello(void);
 bool should_update_encoder_display(void);
 void update_encoder_display(void);
+void init_next_peak_pin();
+void move_to_next_peak();
+void analyze_peaks(int slice_length);
+void display_peak_info();
 
 #endif // SND_ANALIZER_H
