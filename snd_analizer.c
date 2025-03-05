@@ -563,6 +563,50 @@ void display_peak_info() {
                        peak_durations[current_peak_index]);
 }
 
+/**
+ * Обчислює тривалість піку в мілісекундах на основі сирих даних АЦП (adc_values).
+ * Пошук меж піку розпочинається з меж заданого слайсу (slice_start, slice_end) і 
+ * розширюється ліворуч і праворуч, доки значення не впадуть нижче порогу PEAK_THRESHOLD.
+ * Якщо тривалість менша за MIN_PEAK_DURATION, повертається мінімальне значення.
+ *
+ * @param slice_start Початковий індекс слайсу в масиві adc_values.
+ * @param slice_end Кінцевий індекс слайсу в масиві adc_values.
+ * @return Тривалість піку в мілісекундах (1 запис = 1 мс при частоті 1000 Гц).
+ */
+int calculate_peak_duration(int slice_start, int slice_end) {
+    const float PEAK_THRESHOLD = 2.50f; // Поріг значущості піку в вольтах
+
+    int peak_start = slice_start;
+    int peak_end = slice_end;
+
+    // Розширюємо межі піку ліворуч
+    while (peak_start > 0 && 
+           (adc_values[peak_start - 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+        peak_start--;
+    }
+
+    // Розширюємо межі піку праворуч
+    while (peak_end < SAMPLE_ARRAY_SIZE - 1 && 
+           (adc_values[peak_end + 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
+        peak_end++;
+    }
+
+    // Обчислюємо тривалість у записах і переводимо в мілісекунди
+    int duration = peak_end - peak_start + 1;
+    int duration_ms = duration;
+    if (duration_ms < MIN_PEAK_DURATION) duration_ms = MIN_PEAK_DURATION;
+
+    return duration_ms;
+}
+
+/**
+ * Аналізує масив середніх значень слайсів (saved_slices_averages) для пошуку піків,
+ * які перевищують поріг PEAK_THRESHOLD (2.50 В). Зберігає індекси піків у peak_slices,
+ * їхню кількість у peak_count, а тривалості у peak_durations, викликаючи 
+ * calculate_peak_duration(). Пропускає слайси, які входять у тривалість попереднього піку.
+ *
+ * @param slice_length Кількість записів у кожному слайсі (наприклад, 50).
+ */
 void analyze_peaks(int slice_length) {
     peak_count = 0;
     const float PEAK_THRESHOLD = 2.50f; // Поріг значущості піку
@@ -574,34 +618,21 @@ void analyze_peaks(int slice_length) {
             if (peak_count < TOTAL_SLICES) {
                 peak_slices[peak_count] = i;
 
+                // Визначаємо межі слайсу для обчислення тривалості
                 int slice_start = i * slice_length;
                 int slice_end = (i + 1) * slice_length - 1;
                 if (slice_end >= SAMPLE_ARRAY_SIZE) slice_end = SAMPLE_ARRAY_SIZE - 1;
 
-                int peak_start = slice_start;
-                int peak_end = slice_end;
+                // Обчислюємо тривалість піку
+                peak_durations[peak_count] = calculate_peak_duration(slice_start, slice_end);
 
-                while (peak_start > 0 && 
-                       (adc_values[peak_start - 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
-                    peak_start--;
-                }
-
-                while (peak_end < SAMPLE_ARRAY_SIZE - 1 && 
-                       (adc_values[peak_end + 1] * CONVERSION_FACTOR) > PEAK_THRESHOLD) {
-                    peak_end++;
-                }
-
-                int duration = peak_end - peak_start + 1; // У записах
-                int duration_ms = duration; // У мс (1 запис = 1 мс)
-                if (duration_ms < MIN_PEAK_DURATION) duration_ms = MIN_PEAK_DURATION;
-
-                peak_durations[peak_count] = duration_ms; // Зберігаємо тривалість
                 printf("Peak at slice %d: %.3f V, duration %d ms\n", 
-                       i, avg_volt, duration_ms);
+                       i, avg_volt, peak_durations[peak_count]);
 
                 peak_count++;
 
-                int next_slice = (peak_end + 1) / slice_length;
+                // Пропускаємо слайси, які входять у тривалість піку
+                int next_slice = (slice_end + 1) / slice_length;
                 if (next_slice > i) i = next_slice - 1;
             }
         }

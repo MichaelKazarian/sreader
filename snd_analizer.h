@@ -89,6 +89,7 @@ bool should_update_encoder_display(void);
 void update_encoder_display(void);
 void init_next_peak_pin();
 void move_to_next_peak();
+int calculate_peak_duration(int slice_start, int slice_end);
 void analyze_peaks(int slice_length);
 void display_peak_info();
 
